@@ -11,17 +11,16 @@ from dataclasses import dataclass
 import os
 
 @dataclass
-class HardwareConfig3D:
+class HardwareConfig2D:
     # ==========================================
     # 1. KÍCH THƯỚC BÀI TOÁN (WORKLOAD)
     # ==========================================
-    D: int = 16     # Depth 
+    M: int = 16     # Output Channels (Kernels)
     H: int = 32     # Height
     W: int = 32     # Width
     C_in: int = 64  # Input Channels
     
-    # Kích thước Kernel 3D
-    K_D: int = 3
+    # Kích thước Kernel 2D
     K_H: int = 3
     K_W: int = 3
 
@@ -74,10 +73,6 @@ class SimulationStats:
         return self.total_mac / self.dram_input_reads
         
     def output_reuse_factor(self):
-        # Depending on whether we measure reuse as MACs / output writes
-        # OS keeps PSUMs inside PE accumulator (no SRAM write), WS reads/writes to SRAM/DRAM.
-        # But specifically, the README says: "OS primary reuse target: Partial Sum".
-        # Reuse = MACs / (partial_sum_reads + partial_sum_writes + dram_output_writes).
         total_output_traffic = self.partial_sum_reads + self.partial_sum_writes + self.dram_output_writes
         if total_output_traffic == 0: return 0.0
         return self.total_mac / total_output_traffic
@@ -115,37 +110,33 @@ class SimulationStats:
         print(f"  Stall Cycles:     {self.stall_cycles:,}")
         print(f"{'='*70}\n")
 
-def generate_data_3d(config):
-    """Generate mock data for Conv3D validation"""
-    print(f"[DATA] Generating random data for Conv3D...")
-    # Dữ liệu Input: (C_in, D, H, W)
-    d_in = np.random.randint(0, 5, (config.C_in, config.D, config.H, config.W), dtype=np.int32)
-    # Trọng số: (C_out=1, C_in, K_D, K_H, K_W)
-    d_w = np.random.randint(0, 5, (1, config.C_in, config.K_D, config.K_H, config.K_W), dtype=np.int32)
+def generate_data_2d(config):
+    """Generate mock data for Conv2D validation"""
+    print(f"[DATA] Generating random data for Conv2D...")
+    # Dữ liệu Input: (C_in, H, W)
+    d_in = np.random.randint(0, 5, (config.C_in, config.H, config.W), dtype=np.int32)
+    # Trọng số: (M, C_in, K_H, K_W)
+    d_w = np.random.randint(0, 5, (config.M, config.C_in, config.K_H, config.K_W), dtype=np.int32)
     
     return d_in, d_w
 
-def software_conv3d(d_in, d_w, config):
-    """Tính toán Conv3D tuần tự trên CPU để làm baseline đối chiếu kết quả (Golden Model)"""
-    D_out = config.D - config.K_D + 1
+def software_conv2d(d_in, d_w, config):
+    """Tính toán Conv2D tuần tự trên CPU để làm baseline đối chiếu kết quả (Golden Model)"""
     H_out = config.H - config.K_H + 1
     W_out = config.W - config.K_W + 1
     
-    out = np.zeros((1, D_out, H_out, W_out), dtype=np.int32) # (C_out=1, D_out, H_out, W_out)
+    out = np.zeros((config.M, H_out, W_out), dtype=np.int32) # (M, H_out, W_out)
     
     total_macs = 0
-    print("[SW BASELINE] Bắt đầu tính toán Conv3D thuần túy...")
+    print("[SW BASELINE] Bắt đầu tính toán Conv2D thuần túy...")
     start_time = time.time()
     
-    # 6 vòng lặp for (Loop Nest) tương ứng với Conv3D
-    for od in range(D_out):
+    for m in range(config.M):
         for oh in range(H_out):
             for ow in range(W_out):
-                # Trích xuất khối voxel 3D (patch) từ Input Feature Map
-                in_patch = d_in[:, od:od+config.K_D, oh:oh+config.K_H, ow:ow+config.K_W]
-                # Thực hiện MAC (Multiply-Accumulate) với duy nhất 1 Kernel (c_out = 0)
-                out[0, od, oh, ow] = np.sum(in_patch * d_w[0])
-                total_macs += config.C_in * config.K_D * config.K_H * config.K_W
+                in_patch = d_in[:, oh:oh+config.K_H, ow:ow+config.K_W]
+                out[m, oh, ow] = np.sum(in_patch * d_w[m])
+                total_macs += config.C_in * config.K_H * config.K_W
                 
     end_time = time.time()
     
@@ -159,6 +150,6 @@ def software_conv3d(d_in, d_w, config):
     return out
 
 if __name__ == "__main__":
-    cfg = HardwareConfig3D()
-    d_in, d_w = generate_data_3d(cfg)
-    golden_out = software_conv3d(d_in, d_w, cfg)
+    cfg = HardwareConfig2D()
+    d_in, d_w = generate_data_2d(cfg)
+    golden_out = software_conv2d(d_in, d_w, cfg)

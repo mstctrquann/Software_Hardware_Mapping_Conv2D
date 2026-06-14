@@ -7,11 +7,11 @@ if isinstance(sys.stdout, io.TextIOWrapper) and sys.stdout.encoding != 'utf-8':
 import numpy as np
 import time
 
-from convolution3d_mapping_baseline import HardwareConfig3D, SimulationStats, generate_data_3d, software_conv3d
+from convolution2d_mapping_baseline import HardwareConfig2D, SimulationStats, generate_data_2d, software_conv2d
 
-class Accelerator3D_OS:
+class Accelerator2D_OS:
     """Mô phỏng Output Stationary (OS) Dataflow"""
-    def __init__(self, config: HardwareConfig3D):
+    def __init__(self, config: HardwareConfig2D):
         self.cfg = config
         self.stats = SimulationStats()
         
@@ -30,23 +30,22 @@ class Accelerator3D_OS:
         return psum_size * self.cfg.CYCLE_DRAM_RD
 
     def run(self, dram_in, dram_w, verbose=False):
-        print(f"[OS] Bắt đầu mô phỏng Output Stationary cho Conv3D...")
+        print(f"[OS] Bắt đầu mô phỏng Output Stationary cho Conv2D...")
         start_time = time.time()
         
-        D_out = self.cfg.D - self.cfg.K_D + 1
         H_out = self.cfg.H - self.cfg.K_H + 1
         W_out = self.cfg.W - self.cfg.K_W + 1
         
-        dram_out = np.zeros((1, D_out, H_out, W_out), dtype=np.int32)
+        dram_out = np.zeros((self.cfg.M, H_out, W_out), dtype=np.int32)
         
         num_ch_tiles = self.cfg.C_in // self.cfg.PE_ROWS
         if self.cfg.C_in % self.cfg.PE_ROWS != 0:
             num_ch_tiles += 1
             
-        self.stats.total_mac = D_out * H_out * W_out * self.cfg.C_in * self.cfg.K_D * self.cfg.K_H * self.cfg.K_W
+        self.stats.total_mac = self.cfg.M * H_out * W_out * self.cfg.C_in * self.cfg.K_H * self.cfg.K_W
         
         # OUTPUT STATIONARY LOOP ORDER: Outer loops are Spatial (Outputs kept stationary in Accumulators)
-        for od in range(D_out):
+        for m in range(self.cfg.M):
             for oh in range(H_out):
                 for ow_tile in range(0, W_out, self.cfg.PE_COLS):
                     valid_width = min(self.cfg.PE_COLS, W_out - ow_tile)
@@ -59,33 +58,32 @@ class Accelerator3D_OS:
                         actual_channels = min(self.cfg.PE_ROWS, self.cfg.C_in - c_start)
                         
                         # Load Input Tile từ DRAM
-                        in_size = actual_channels * self.cfg.K_D * self.cfg.K_H * (valid_width + self.cfg.K_W - 1)
+                        in_size = actual_channels * self.cfg.K_H * (valid_width + self.cfg.K_W - 1)
                         t_load_in = self.load_input_from_dram(in_size)
                         
                         # Load Weight từ DRAM
-                        w_size = actual_channels * self.cfg.K_D * self.cfg.K_H * self.cfg.K_W
+                        w_size = actual_channels * self.cfg.K_H * self.cfg.K_W
                         t_load_w = self.load_weight_from_dram(w_size)
                         
                         # Compute
-                        t_compute = self.cfg.K_D * self.cfg.K_H * self.cfg.K_W * self.cfg.CYCLE_MAC
+                        t_compute = self.cfg.K_H * self.cfg.K_W * self.cfg.CYCLE_MAC
                         self.stats.compute_cycles += t_compute
                         
                         # Track SRAM Reads
-                        macs_in_tile = actual_channels * valid_width * self.cfg.K_D * self.cfg.K_H * self.cfg.K_W
+                        macs_in_tile = actual_channels * valid_width * self.cfg.K_H * self.cfg.K_W
                         # OS stream cả Weight và Input từ SRAM vào PE cho mỗi MAC
                         self.stats.sram_input_reads += macs_in_tile
                         self.stats.sram_weight_reads += macs_in_tile
                         
                         # Không có partial_sum_reads vì nó được giữ ở Accumulator trong PE
                         
-                        for kd in range(self.cfg.K_D):
-                            for kh in range(self.cfg.K_H):
-                                for kw in range(self.cfg.K_W):
-                                    w_vec = dram_w[0, c_start:c_start+actual_channels, kd, kh, kw].reshape(actual_channels, 1)
-                                    in_mat = dram_in[c_start:c_start+actual_channels, od+kd, oh+kh, ow_tile+kw : ow_tile+kw+valid_width]
-                                    partial_sum = np.sum(w_vec * in_mat, axis=0)
-                                    dram_out[0, od, oh, ow_tile:ow_tile+valid_width] += partial_sum
-                                    
+                        for kh in range(self.cfg.K_H):
+                            for kw in range(self.cfg.K_W):
+                                w_vec = dram_w[m, c_start:c_start+actual_channels, kh, kw].reshape(actual_channels, 1)
+                                in_mat = dram_in[c_start:c_start+actual_channels, oh+kh, ow_tile+kw : ow_tile+kw+valid_width]
+                                partial_sum = np.sum(w_vec * in_mat, axis=0)
+                                dram_out[m, oh, ow_tile:ow_tile+valid_width] += partial_sum
+                                        
                         t_store_psum = 0
                         # Cuối channel loop, ghi kết quả hoàn chỉnh ra DRAM
                         if k == num_ch_tiles - 1:
@@ -101,11 +99,11 @@ class Accelerator3D_OS:
         return dram_out, self.stats
 
 if __name__ == "__main__":
-    cfg = HardwareConfig3D(D=8, H=16, W=16, C_in=32)
-    d_in, d_w = generate_data_3d(cfg)
-    accel = Accelerator3D_OS(cfg)
+    cfg = HardwareConfig2D(H=16, W=16, C_in=32, M=4)
+    d_in, d_w = generate_data_2d(cfg)
+    accel = Accelerator2D_OS(cfg)
     hw_out, stats = accel.run(d_in, d_w)
-    sw_out = software_conv3d(d_in, d_w, cfg)
+    sw_out = software_conv2d(d_in, d_w, cfg)
     
     stats.print_report("Output Stationary (OS)", cfg.PE_ROWS, cfg.PE_COLS)
     

@@ -7,12 +7,12 @@ import matplotlib.pyplot as plt
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
-# Import our 3D modules
-from convolution3d_mapping_baseline import HardwareConfig3D, generate_data_3d
-from conv3d_baseline import Accelerator3D_Baseline
-from conv3d_ws import Accelerator3D_WS
-from conv3d_is import Accelerator3D_IS
-from conv3d_os import Accelerator3D_OS
+# Import our 2D modules
+from convolution2d_mapping_baseline import HardwareConfig2D, generate_data_2d
+from conv2d_baseline import Accelerator2D_Baseline
+from conv2d_ws import Accelerator2D_WS
+from conv2d_is import Accelerator2D_IS
+from conv2d_os import Accelerator2D_OS
 
 def ensure_dir(path):
     os.makedirs(path, exist_ok=True)
@@ -51,7 +51,7 @@ def plot_metric(labels, values, title, ylabel, filepath, format_str='%.2e'):
     plt.close()
 
 def main():
-    print("[BENCHMARK 3D] Starting Conv3D Dataflow Comparison...")
+    print("[BENCHMARK 2D] Starting Conv2D Dataflow Comparison...")
     
     # Create subfolders for results
     base_dir = "Results"
@@ -65,13 +65,13 @@ def main():
     for d in dirs.values():
         ensure_dir(d)
         
-    cfg = HardwareConfig3D()
-    d_in, d_w = generate_data_3d(cfg)
+    cfg = HardwareConfig2D()
+    d_in, d_w = generate_data_2d(cfg)
     
-    accel_base = Accelerator3D_Baseline(cfg)
-    accel_ws = Accelerator3D_WS(cfg)
-    accel_is = Accelerator3D_IS(cfg)
-    accel_os = Accelerator3D_OS(cfg)
+    accel_base = Accelerator2D_Baseline(cfg)
+    accel_ws = Accelerator2D_WS(cfg)
+    accel_is = Accelerator2D_IS(cfg)
+    accel_os = Accelerator2D_OS(cfg)
     
     _, stats_base = accel_base.run(d_in, d_w)
     _, stats_ws = accel_ws.run(d_in, d_w)
@@ -81,7 +81,7 @@ def main():
     labels = ['Baseline', 'WS', 'IS', 'OS']
     stats = [stats_base, stats_ws, stats_is, stats_os]
     
-    print("\n[BENCHMARK 3D] Generating individual metric plots...")
+    print("\n[BENCHMARK 2D] Generating individual metric plots...")
     
     # ---------------------------------------------------------
     # 1. COMPUTE METRICS
@@ -137,7 +137,7 @@ def main():
     v_ro = [s.output_reuse_factor() for s in stats]
     plot_metric(labels, v_ro, "Output/Psum Reuse Factor", "MACs / Traffic", os.path.join(dirs["reuse"], "output_reuse_factor.png"), "%.1f")
 
-    print("[BENCHMARK 3D] All plots saved successfully in subfolders: compute, load, store, reuse.")
+    print("[BENCHMARK 2D] All plots saved successfully in subfolders: compute, load, store, reuse.")
 
 if __name__ == "__main__":
     main()
